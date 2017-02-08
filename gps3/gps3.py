@@ -29,6 +29,7 @@ import json
 import select
 import socket
 import sys
+from Queue import Queue
 
 __author__ = 'Moe'
 __copyright__ = 'Copyright 2015-2016  Moe'
@@ -46,6 +47,7 @@ class GPSDSocket(object):
     def __init__(self):
         self.streamSock = None
         self.response = None
+        self.queue = Queue(2048)
 
     def connect(self, host=HOST, port=GPSD_PORT):
         """Connect to a host on a given port.
@@ -114,14 +116,19 @@ class GPSDSocket(object):
         """
         try:
             waitin, _waitout, _waiterror = select.select((self.streamSock,), (), (), timeout)
-            if not waitin: return
+            if not waitin and self.queue.empty: return
             else:
                 gpsd_response = self.streamSock.makefile()  # '.makefile(buffering=4096)' In strictly Python3
-                self.response = gpsd_response.readline()
-            return self.response
+                for _ in xrange(10):
+                    data = gpsd_response.readline()
+                    if data and len(data.strip()) != 0:
+                        self.queue.put(data)
+            return self.queue.get_nowait()
 
         except StopIteration as error:
             sys.stderr.write('The readline exception in GPSDSocket.next is--> {}'.format(error))
+        except socket.error:
+            return self.queue.get_nowait()
 
     __next__ = next  # Workaround for changes in iterating between Python 2.7 and 3
 
